@@ -1,45 +1,45 @@
 """
-Terminal output utilities: colors and structured logging.
+终端输出工具：颜色与结构化日志。
 
-Single source of truth for Colors and log_* functions
-used across all Trellis scripts.
+``Colors`` 与 ``log_*`` 函数的单一来源，供所有 Trellis 脚本复用。
 """
 
+# 启用延迟注解求值
 from __future__ import annotations
 
 
 class Colors:
-    """ANSI color codes for terminal output."""
+    """终端 ANSI 颜色码常量。"""
 
-    RED = "\033[0;31m"
-    GREEN = "\033[0;32m"
-    YELLOW = "\033[1;33m"
-    BLUE = "\033[0;34m"
-    CYAN = "\033[0;36m"
-    DIM = "\033[2m"
-    NC = "\033[0m"  # No Color / Reset
+    RED = "\033[0;31m"  # 红色（错误）
+    GREEN = "\033[0;32m"  # 绿色（成功）
+    YELLOW = "\033[1;33m"  # 黄色（警告）
+    BLUE = "\033[0;34m"  # 蓝色（信息）
+    CYAN = "\033[0;36m"  # 青色
+    DIM = "\033[2m"  # 暗色/弱化显示
+    NC = "\033[0m"  # 复位（No Color）
 
 
 def colored(text: str, color: str) -> str:
-    """Apply ANSI color to text."""
-    return f"{color}{text}{Colors.NC}"
+    """给文本套上 ANSI 颜色，并在末尾复位。"""
+    return f"{color}{text}{Colors.NC}"  # 颜色 + 正文 + 复位
 
 
 def log_info(msg: str) -> None:
-    """Print info-level message with [INFO] prefix."""
-    print(f"{Colors.BLUE}[INFO]{Colors.NC} {msg}")
+    """打印带 [INFO] 前缀的信息级日志。"""
+    print(f"{Colors.BLUE}[INFO]{Colors.NC} {msg}")  # 蓝色 INFO
 
 
 def log_success(msg: str) -> None:
-    """Print success message with [SUCCESS] prefix."""
-    print(f"{Colors.GREEN}[SUCCESS]{Colors.NC} {msg}")
+    """打印带 [SUCCESS] 前缀的成功日志。"""
+    print(f"{Colors.GREEN}[SUCCESS]{Colors.NC} {msg}")  # 绿色 SUCCESS
 
 
 def log_warn(msg: str) -> None:
-    """Print warning message with [WARN] prefix."""
-    print(f"{Colors.YELLOW}[WARN]{Colors.NC} {msg}")
+    """打印带 [WARN] 前缀的警告日志。"""
+    print(f"{Colors.YELLOW}[WARN]{Colors.NC} {msg}")  # 黄色 WARN
 
 
 def log_error(msg: str) -> None:
-    """Print error message with [ERROR] prefix."""
-    print(f"{Colors.RED}[ERROR]{Colors.NC} {msg}")
+    """打印带 [ERROR] 前缀的错误日志。"""
+    print(f"{Colors.RED}[ERROR]{Colors.NC} {msg}")  # 红色 ERROR
