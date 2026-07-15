@@ -1,37 +1,13 @@
 """
-Safe git-add helpers for Trellis-owned paths.
+安全 git 提交辅助。
 
-Why this module exists
-----------------------
-A real user incident: a project's `.gitignore` listed `.trellis/` (company-wide
-template / personal habit). When `add_session.py` and `task.py archive` ran
-their auto-commit and `git add` failed with `ignored by .gitignore`, the AI
-agent driving the workflow "fixed" it by retrying with
-`git add -f .trellis/` — which fan-out-included every ignored subtree
-(`.trellis/.backup-*/`, `.trellis/worktrees/`, `.trellis/.template-hashes.json`,
-`.trellis/.runtime/`), committing 548 files / 83474 lines of caches/backups.
-
-Design
-------
-- Scripts only stage SPECIFIC product paths (journal files, index.md, the
-  current task dir, the archive dir). Never the whole `.trellis/` tree.
-- If plain `git add <specific>` fails with "ignored by", DO NOT retry with
-  ``-f``. The presence of `.trellis/` in `.gitignore` is treated as user
-  intent ("keep .trellis/ local-only"). The script warns and skips the
-  auto-commit; users who want auto-staging can either fix their `.gitignore`
-  or set ``session_auto_commit: false`` and manage git themselves.
-- The warning includes a negative example: ``Do NOT use `git add -f .trellis/` ...``
-  so any AI rereading the log doesn't reinvent the bug.
-
-History note: 0.5.10 introduced an automatic ``git add -f`` retry on the
-specific paths. That was reverted in 0.5.11 — auto-forcing into a tree the
-user had gitignored violates user intent even when the path list is narrow.
-The wider-grain forbidden command stays forbidden, and the narrow-grain auto
-``-f`` is gone too.
+在尊重 gitignore 的前提下选择可 add 的 Trellis 路径，并给出警告。
 """
 
+# 启用延迟注解求值等 future 特性
 from __future__ import annotations
 
+# 导入依赖
 import sys
 from pathlib import Path
 
@@ -46,9 +22,10 @@ from .paths import (
 )
 
 
-# Paths under .trellis/ that must NEVER be auto-staged. Listed here so the
-# warning to the user can show concrete subpaths to ignore individually
-# instead of ignoring the whole `.trellis/` tree.
+# .trellis/ 下严禁自动暂存的路径。列在这里以便
+# 警告能向用户展示可单独忽略的具体子路径
+# 而不是忽略整个 `.trellis/` 树。
+# 打包元组赋给 TRELLIS_IGNORED_SUB…
 TRELLIS_IGNORED_SUBPATHS = (
     ".trellis/.backup-*",
     ".trellis/worktrees/",
@@ -62,7 +39,8 @@ def safe_trellis_paths_to_add(
     repo_root: Path,
     task_name: str | None = None,
 ) -> list[str]:
-    """Return the list of repo-relative paths the auto-commit should stage.
+    """
+    返回：Return the list of repo-relative paths the auto-commit should stage.
 
     Only includes paths that exist on disk so callers don't pass non-existent
     arguments to git. The caller is responsible for `git diff --cached`
@@ -89,56 +67,82 @@ def safe_trellis_paths_to_add(
     task directory (+ the archive subtree) the old wide way. New callers
     should always pass ``task_name``.
     """
+    # 赋值（含类型标注）：paths
     paths: list[str] = []
 
-    # Workspace journal files + index.md
+    # 工作区 journal 文件与 index.md
+    # developer ← 调用 get_developer
     developer = get_developer(repo_root)
+    # 条件分支：developer
     if developer:
+        # 计算后赋给 ws
         ws = repo_root / DIR_WORKFLOW / DIR_WORKSPACE / developer
+        # 条件分支：ws.is_dir()
         if ws.is_dir():
+            # 遍历：f in sorted(ws.glob(f"{FILE_JOURNAL_PREFIX}*.md"))
             for f in sorted(ws.glob(f"{FILE_JOURNAL_PREFIX}*.md")):
+                # 条件分支：f.is_file()
                 if f.is_file():
+                    # 追加到列表
                     paths.append(
                         f"{DIR_WORKFLOW}/{DIR_WORKSPACE}/{developer}/{f.name}"
                     )
+            # 计算后赋给 index_md
             index_md = ws / "index.md"
+            # 条件分支：index_md.is_file()
             if index_md.is_file():
+                # 追加到列表
                 paths.append(
                     f"{DIR_WORKFLOW}/{DIR_WORKSPACE}/{developer}/index.md"
                 )
 
+    # 计算后赋给 tasks_dir
     tasks_dir = repo_root / DIR_WORKFLOW / DIR_TASKS
+    # 若条件不成立：not tasks_dir.is_dir()
     if not tasks_dir.is_dir():
-        return paths
+        return paths  # 返回 paths
 
+    # 若已有值：task_name is not None
     if task_name is not None:
-        # Narrow scope — ONLY the current task directory (active or archived).
-        # Never iterdir() all tasks: parallel-window dirty task dirs must not
-        # leak into the session auto-commit.
+        # 窄作用域——仅当前任务目录（活动或已归档）。
+        # 切勿对全部任务 iterdir()：并行窗口下其它任务的脏目录不得
+        # 泄漏进会话自动提交。
+        # 计算后赋给 active_task
         active_task = tasks_dir / task_name
+        # 条件分支：active_task.is_dir()
         if active_task.is_dir():
+            # 追加到列表
             paths.append(f"{DIR_WORKFLOW}/{DIR_TASKS}/{task_name}")
+        # 计算后赋给 archived_task
         archived_task = tasks_dir / DIR_ARCHIVE / task_name
+        # 条件分支：archived_task.is_dir()
         if archived_task.is_dir():
+            # 追加到列表
             paths.append(
                 f"{DIR_WORKFLOW}/{DIR_TASKS}/{DIR_ARCHIVE}/{task_name}"
             )
-        return paths
+        return paths  # 返回 paths
 
-    # Legacy wide scope (no task_name): each direct child of tasks/ that is a
-    # directory and not the archive root, plus the whole archive subtree.
+    # 旧版宽作用域（无 task_name）：tasks/ 下每个直接子目录若是
+    # 目录（且不是 archive 根），再加上整个 archive 子树。
     for child in sorted(tasks_dir.iterdir()):
+        # 若条件不成立：not child.is_dir()
         if not child.is_dir():
-            continue
+            continue  # 跳过本轮循环
+        # 条件分支：child.name == DIR_ARCHIVE
         if child.name == DIR_ARCHIVE:
-            continue
+            continue  # 跳过本轮循环
+        # 追加到列表
         paths.append(f"{DIR_WORKFLOW}/{DIR_TASKS}/{child.name}")
 
+    # 计算后赋给 archive_dir
     archive_dir = tasks_dir / DIR_ARCHIVE
+    # 条件分支：archive_dir.is_dir()
     if archive_dir.is_dir():
+        # 追加到列表
         paths.append(f"{DIR_WORKFLOW}/{DIR_TASKS}/{DIR_ARCHIVE}")
 
-    return paths
+    return paths  # 返回 paths
 
 
 def safe_archive_paths_to_add(
@@ -146,7 +150,8 @@ def safe_archive_paths_to_add(
     task_name: str | None = None,
     modified_children: list[str] | None = None,
 ) -> list[str]:
-    """Return paths to stage after `task.py archive`.
+    """
+    返回：Return paths to stage after `task.py archive`.
 
     Scoped to ONLY the paths the archive operation actually touched:
 
@@ -166,51 +171,70 @@ def safe_archive_paths_to_add(
     `.trellis/tasks/` subtree the old way (active tasks + archive). New
     callers should always pass `task_name`.
     """
+    # 赋值（含类型标注）：paths
     paths: list[str] = []
+    # 计算后赋给 tasks_dir
     tasks_dir = repo_root / DIR_WORKFLOW / DIR_TASKS
+    # 若条件不成立：not tasks_dir.is_dir()
     if not tasks_dir.is_dir():
-        return paths
+        return paths  # 返回 paths
 
+    # 计算后赋给 archive_dir
     archive_dir = tasks_dir / DIR_ARCHIVE
 
+    # 若已有值：task_name is not None
     if task_name is not None:
-        # Narrow scope — only paths that still exist on disk (so
-        # `git add` doesn't choke on the moved-away source). The caller
-        # handles the source-side deletes via `git rm --cached`
-        # explicitly.
+        # 窄作用域——仅磁盘上仍存在的路径（以便
+        # `git add` 不会因源路径已搬走而失败）。调用方
+        # 通过 `git rm --cached` 处理源侧删除
+        # 标识：explicitly.
+        # 条件分支：archive_dir.is_dir()
         if archive_dir.is_dir():
+            # 追加到列表
             paths.append(
                 f"{DIR_WORKFLOW}/{DIR_TASKS}/{DIR_ARCHIVE}"
             )
+        # 遍历：child_name in modified_children or []
         for child_name in modified_children or []:
+            # 追加到列表
             paths.append(f"{DIR_WORKFLOW}/{DIR_TASKS}/{child_name}")
-        return paths
+        return paths  # 返回 paths
 
-    # Legacy wide scope (no task_name): preserve old behavior so callers
-    # that have not been updated keep working.
+    # 旧版宽作用域（无 task_name）：保留旧行为，使尚未更新的调用方
+    # 仍可继续工作。
+    # 条件分支：archive_dir.is_dir()
     if archive_dir.is_dir():
+        # 追加到列表
         paths.append(f"{DIR_WORKFLOW}/{DIR_TASKS}/{DIR_ARCHIVE}")
+    # 遍历：child in sorted(tasks_dir.iterdir())
     for child in sorted(tasks_dir.iterdir()):
+        # 若条件不成立：not child.is_dir()
         if not child.is_dir():
-            continue
+            continue  # 跳过本轮循环
+        # 条件分支：child.name == DIR_ARCHIVE
         if child.name == DIR_ARCHIVE:
-            continue
+            continue  # 跳过本轮循环
+        # 追加到列表
         paths.append(f"{DIR_WORKFLOW}/{DIR_TASKS}/{child.name}")
-    return paths
+    return paths  # 返回 paths
 
 
 def _stderr_indicates_ignored(stderr: str) -> bool:
-    """git add error indicates the path is excluded by .gitignore."""
+    """判断 git add 的错误输出是否表示路径被 .gitignore 排除。"""
+    # 若条件不成立：not stderr
     if not stderr:
-        return False
+        return False  # 返回 False
+    # lowered ← 调用 stderr.lower
     lowered = stderr.lower()
+    # 返回 "ignored by" in lowered
     return "ignored by" in lowered
 
 
 def safe_git_add(
     paths: list[str], repo_root: Path
 ) -> tuple[bool, bool, str]:
-    """Run `git add` on specific paths; never retry with -f.
+    """
+    执行：Run `git add` on specific paths; never retry with -f.
 
     Returns ``(success, used_force, stderr)``. The ``used_force`` field is
     kept for signature compatibility with the 0.5.10 implementation but is
@@ -223,92 +247,115 @@ def safe_git_add(
         the stderr. Callers should inspect the stderr (see
         :func:`print_gitignore_warning`) and skip the auto-commit.
     """
+    # 若条件不成立：not paths
     if not paths:
-        return True, False, ""
+        return True, False, ""  # 返回结果
 
+    # rc, _, err ← 调用 run_git
     rc, _, err = run_git(["add", "--", *paths], cwd=repo_root)
+    # 条件分支：rc == 0
     if rc == 0:
-        return True, False, ""
-    return False, False, err
+        return True, False, ""  # 返回结果
+    return False, False, err  # 返回结果
 
 
 def print_gitignore_warning(paths: list[str]) -> None:
-    """Explain to the user (and any AI reading the log) what to do.
-
-    CRITICAL: includes the negative example
-    ``Do NOT use `git add -f .trellis/``` — agents reading the warning are
-    known to invent that command, which fans out to ignored caches/backups.
-    """
+    """向用户（以及阅读日志的 AI）解释路径因 gitignore 未被纳入暂存。"""
+    # 输出信息
     print(
         "[WARN] git add failed because .trellis/ paths are ignored by your .gitignore.",
         file=sys.stderr,
     )
+    # 输出信息
     print(
         "[WARN] Skipping auto-commit. The journal/task files were still written to disk;",
         file=sys.stderr,
     )
+    # 输出信息
     print(
         "[WARN] git was not touched.",
         file=sys.stderr,
     )
+    # 输出信息
     print("[WARN]", file=sys.stderr)
+    # 输出信息
     print(
         "[WARN] Trellis manages these specific paths and they should be tracked:",
         file=sys.stderr,
     )
+    # 条件分支：paths
     if paths:
+        # 遍历：p in paths
         for p in paths:
+            # 输出信息
             print(f"[WARN]   {p}", file=sys.stderr)
     else:
+        # 输出信息
         print(
             "[WARN]   .trellis/workspace/<developer>/{journal-*.md,index.md}",
             file=sys.stderr,
         )
+        # 输出信息
         print(
             "[WARN]   .trellis/tasks/<task-dir>/",
             file=sys.stderr,
         )
+        # 输出信息
         print(
             "[WARN]   .trellis/tasks/archive/",
             file=sys.stderr,
         )
+    # 输出信息
     print("[WARN]", file=sys.stderr)
+    # 输出信息
     print(
         "[WARN] Recommended: change your .gitignore from `.trellis/` to specific",
         file=sys.stderr,
     )
+    # 输出信息
     print(
         "[WARN] subpaths that should remain ignored, e.g.:",
         file=sys.stderr,
     )
+    # 遍历：sub in TRELLIS_IGNORED_SUBPATHS
     for sub in TRELLIS_IGNORED_SUBPATHS:
+        # 输出信息
         print(f"[WARN]   {sub}", file=sys.stderr)
+    # 输出信息
     print("[WARN]", file=sys.stderr)
+    # 输出信息
     print(
         "[WARN] Or, if you intentionally keep .trellis/ local-only, set in",
         file=sys.stderr,
     )
+    # 输出信息
     print(
         "[WARN] .trellis/config.yaml:",
         file=sys.stderr,
     )
+    # 输出信息
     print(
         "[WARN]   session_auto_commit: false",
         file=sys.stderr,
     )
+    # 输出信息
     print(
         "[WARN] so the scripts skip git entirely and you can review / commit",
         file=sys.stderr,
     )
+    # 输出信息
     print(
         "[WARN] manually with `git status` / `git add` / `git commit`.",
         file=sys.stderr,
     )
+    # 输出信息
     print("[WARN]", file=sys.stderr)
+    # 输出信息
     print(
         "[WARN] Do NOT use `git add -f .trellis/` — it pulls in backups, worktrees,",
         file=sys.stderr,
     )
+    # 输出信息
     print(
         "[WARN] and runtime caches that should never be committed.",
         file=sys.stderr,

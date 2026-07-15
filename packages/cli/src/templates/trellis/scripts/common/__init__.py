@@ -1,60 +1,60 @@
 """
-Common utilities for Trellis workflow scripts.
+Trellis 工作流脚本的公共工具包。
 
-This module provides shared functionality used by other Trellis scripts.
+本模块向其他 Trellis 脚本提供可复用能力；导入本包时会自动处理 Windows 控制台编码。
 """
 
+# 用于在 Windows 上重配标准流编码
 import io
 import sys
 
-# =============================================================================
-# Windows Encoding Fix (MUST be at top, before any other output)
-# =============================================================================
-# On Windows, stdout defaults to the system code page (often GBK/CP936).
-# This causes UnicodeEncodeError when printing non-ASCII characters.
+# 说明：=============================================================================
+# Windows 编码修复（必须靠前，在任何其它输出之前）
+# 说明：=============================================================================
+# 在 Windows 上，stdout 默认常为系统代码页（如 GBK/CP936）。
+# 打印非 ASCII 时可能触发 UnicodeEncodeError。
 #
-# Any script that imports from common will automatically get this fix.
-# =============================================================================
+# 任何从 common 导入的脚本都会自动获得该修复。
+# 说明：=============================================================================
 
 
 def _configure_stream(stream: object) -> object:
-    """Configure a stream for UTF-8 encoding on Windows."""
-    # Try reconfigure() first (Python 3.7+, more reliable)
+    """将流配置为 UTF-8 编码（主要用于 Windows）。"""
+    # 优先 reconfigure()（Python 3.7+，更可靠）
     if hasattr(stream, "reconfigure"):
-        stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
-        return stream
-    # Fallback: detach and rewrap with TextIOWrapper
+        stream.reconfigure(encoding="utf-8", errors="replace")  # 原地改为 UTF-8 # type: ignore[union-attr]
+        return stream  # 返回已配置的原流
+    # 回退：detach 后用 TextIOWrapper 重新包装
     elif hasattr(stream, "detach"):
-        return io.TextIOWrapper(
-            stream.detach(),  # type: ignore[union-attr]
+        return io.TextIOWrapper(  # 新建 UTF-8 文本包装层
+            stream.detach(),  # 剥离旧包装拿到底层 buffer # type: ignore[union-attr]
             encoding="utf-8",
             errors="replace",
         )
-    return stream
+    return stream  # 无法配置则原样返回
 
 
+# 仅在 Windows 上替换标准流
 if sys.platform == "win32":
-    sys.stdout = _configure_stream(sys.stdout)  # type: ignore[assignment]
-    sys.stderr = _configure_stream(sys.stderr)  # type: ignore[assignment]
-    sys.stdin = _configure_stream(sys.stdin)  # type: ignore[assignment]
+    sys.stdout = _configure_stream(sys.stdout)  # 标准输出 UTF-8 # type: ignore[assignment]
+    sys.stderr = _configure_stream(sys.stderr)  # 标准错误 UTF-8 # type: ignore[assignment]
+    sys.stdin = _configure_stream(sys.stdin)  # 标准输入 UTF-8 # type: ignore[assignment]
 
 
 def configure_encoding() -> None:
+    """配置 stdout/stderr/stdin 为 UTF-8（Windows）。
+
+    从 common 导入时已自动调用；不导入 common 的脚本可手动调用。
+    可重复调用，保持幂等。
     """
-    Configure stdout/stderr/stdin for UTF-8 encoding on Windows.
-
-    This is automatically called when importing from common,
-    but can be called manually for scripts that don't import common.
-
-    Safe to call multiple times.
-    """
-    global sys
-    if sys.platform == "win32":
-        sys.stdout = _configure_stream(sys.stdout)  # type: ignore[assignment]
-        sys.stderr = _configure_stream(sys.stderr)  # type: ignore[assignment]
-        sys.stdin = _configure_stream(sys.stdin)  # type: ignore[assignment]
+    global sys  # 显式使用模块级 sys
+    if sys.platform == "win32":  # 仅 Windows 需要重配控制台编码
+        sys.stdout = _configure_stream(sys.stdout)  # 标准输出 UTF-8 # type: ignore[assignment]
+        sys.stderr = _configure_stream(sys.stderr)  # 标准错误 UTF-8 # type: ignore[assignment]
+        sys.stdin = _configure_stream(sys.stdin)  # 标准输入 UTF-8 # type: ignore[assignment]
 
 
+# 再导出路径相关常量与函数，方便 `from common import ...`
 from .paths import (
     DIR_WORKFLOW,
     DIR_WORKSPACE,
@@ -83,6 +83,7 @@ from .paths import (
     generate_task_date_prefix,
 )
 
+# 再导出活跃任务解析 API
 from .active_task import (
     ActiveTask,
     clear_active_task,
